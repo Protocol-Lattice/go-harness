@@ -1,0 +1,17 @@
+{
+  "providers": [
+    {
+      "name": "filesystem",
+      "provider_type": "cli",
+      "command": "./bin/filesystem",
+      "args": ["--root", "."],
+      "tools": [
+        "fs.list",
+        "fs.read",
+        "fs.write",
+        "fs.mkdir",
+        "fs.remove"
+      ]
+    }
+  ]
+}
