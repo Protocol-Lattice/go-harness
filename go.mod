@@ -2,7 +2,7 @@ module github.com/Protocol-Lattice/go-harness
 
 go 1.26.3
 
-require github.com/Protocol-Lattice/go-agent v1.11.9
+require github.com/Protocol-Lattice/go-agent v1.12.0
 
 require (
 	cloud.google.com/go v0.115.0 // indirect
@@ -60,12 +60,13 @@ require (
 	github.com/pion/webrtc/v3 v3.3.5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/revrost/go-openrouter v1.6.0 // indirect
 	github.com/rivo/uniseg v0.4.6 // indirect
 	github.com/sashabaranov/go-openai v1.41.2 // indirect
 	github.com/schollz/progressbar/v2 v2.15.0 // indirect
 	github.com/schollz/progressbar/v3 v3.14.1 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/sugarme/regexpset v0.0.0-20200920021344-4d4ec8eaf93c // indirect
 	github.com/sugarme/tokenizer v0.2.3-0.20230829214935-448e79b1ed65 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
