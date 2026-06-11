@@ -32,6 +32,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	case "chat":
 		return app.chat(ctx, args[1:])
 
+	case "tui":
+		return app.chat(ctx, args[1:])
+
 	case "run":
 		return app.runTask(ctx, args[1:])
 
@@ -98,6 +101,7 @@ go-harness - agentic Go coding harness
 Usage:
   go-harness [prompt...]
   go-harness chat [flags]
+  go-harness tui [flags]
   go-harness run [flags] <prompt>
   go-harness doctor [flags]
   go-harness skills list [flags]
@@ -107,6 +111,7 @@ Usage:
 
 Examples:
   go-harness
+  go-harness tui
   go-harness run "add ./bin/filesystem"
   go-harness chat -model gpt-4o-mini
   go-harness doctor
