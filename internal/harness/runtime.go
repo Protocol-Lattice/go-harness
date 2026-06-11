@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	agent "github.com/Protocol-Lattice/go-agent"
 	"github.com/Protocol-Lattice/go-agent/src/memory"
@@ -20,6 +21,8 @@ type Runtime struct {
 	agent *agent.Agent
 	gate  ApprovalGate
 }
+
+const memoryFlushTimeout = 10 * time.Second
 
 // internal/harness/runtime.go
 
@@ -191,6 +194,13 @@ func (r *Runtime) RunOnce(ctx context.Context, prompt string, out io.Writer) err
 	}
 
 	fmt.Fprintln(out, strings.TrimSpace(fmt.Sprint(resp)))
+
+	flushCtx, flushCancel := context.WithTimeout(ctx, memoryFlushTimeout)
+	defer flushCancel()
+	if err := r.agent.Flush(flushCtx, r.cfg.SessionID); err != nil {
+		return fmt.Errorf("save memory: %w", err)
+	}
+
 	return nil
 }
 

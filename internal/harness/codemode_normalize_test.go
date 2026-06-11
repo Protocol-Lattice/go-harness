@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -176,6 +177,124 @@ func TestNormalizeCodeModeSnippetLeavesProseAlone(t *testing.T) {
 	if got := NormalizeCodeModeSnippet(input); got != input {
 		t.Fatalf("expected prose unchanged, got %q", got)
 	}
+}
+
+func TestNormalizeModelOutputRepairsCodeModeGoProgramJSON(t *testing.T) {
+	input := `{
+  "code": "package main\n\nfunc main() {\n\tprintln(\"Hello, World!\")\n}",
+  "stream": false
+}`
+
+	got, ok := normalizeModelOutputForPrompt(input, codeModeGenerationPromptForTest("create simple hello world application golang in new folder")).(string)
+	if !ok {
+		t.Fatalf("expected string output")
+	}
+
+	var payload struct {
+		Code   string `json:"code"`
+		Stream bool   `json:"stream"`
+	}
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("normalized output is not valid JSON: %v\n%s", err, got)
+	}
+
+	mustContain := []string{
+		`__out = func() any {`,
+		`codemode.CallTool("filesystem.mkdir"`,
+		`"path": "hello-world-go"`,
+		`codemode.CallTool("filesystem.write"`,
+		`"path": "hello-world-go/main.go"`,
+		`package main\n\nfunc main()`,
+		`return map[string]any{`,
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(payload.Code, want) {
+			t.Fatalf("normalized code missing %q:\n%s", want, payload.Code)
+		}
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(payload.Code), "package main") {
+		t.Fatalf("normalized code still starts with package declaration:\n%s", payload.Code)
+	}
+	if payload.Stream {
+		t.Fatalf("stream flag changed to true")
+	}
+}
+
+func TestNormalizeModelOutputRepairsBareGoProgramAfterMkdir(t *testing.T) {
+	input := `{
+  "code": "mkdirResult, err := codemode.CallTool(\"filesystem.mkdir\", map[string]any{\"path\":\"hello-world-go\"})\nif err != nil {\n    __out = err\n    return\n}\n\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"Hello, World!\")\n}\n\n__out = mkdirResult",
+  "stream": false
+}`
+
+	got, ok := normalizeModelOutputForPrompt(input, codeModeGenerationPromptForTest("create new folder and in that folder create simple hello world application golang")).(string)
+	if !ok {
+		t.Fatalf("expected string output")
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("normalized output is not valid JSON: %v\n%s", err, got)
+	}
+
+	mustContain := []string{
+		`codemode.CallTool("filesystem.mkdir"`,
+		`codemode.CallTool("filesystem.write"`,
+		`"path": "hello-world-go/main.go"`,
+		`fmt.Println(\"Hello, World!\")`,
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(payload.Code, want) {
+			t.Fatalf("normalized code missing %q:\n%s", want, payload.Code)
+		}
+	}
+	if strings.HasPrefix(strings.TrimSpace(payload.Code), "package main") {
+		t.Fatalf("normalized code still starts with package declaration:\n%s", payload.Code)
+	}
+}
+
+func TestNormalizeModelOutputRepairsInlineGoProgramAssignment(t *testing.T) {
+	input := `{
+  "code": "mkdirResult, err := codemode.CallTool(\"filesystem.mkdir\", map[string]any{\"path\":\"hello-world-go\"})\nif err != nil {\n    __out = err\n    return\n}\n\ncontent := package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"Hello, World!\")\n}\n\nwriteResult, err := codemode.CallTool(\"filesystem.write\", map[string]any{\"path\":\"hello-world-go/main.go\", \"content\": content})\nif err != nil {\n    __out = err\n    return\n}\n\n__out = writeResult",
+  "stream": false
+}`
+
+	got, ok := normalizeModelOutputForPrompt(input, codeModeGenerationPromptForTest("create simple hello world application in golang in new folder")).(string)
+	if !ok {
+		t.Fatalf("expected string output")
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("normalized output is not valid JSON: %v\n%s", err, got)
+	}
+
+	mustContain := []string{
+		`__out = func() any {`,
+		`codemode.CallTool("filesystem.mkdir"`,
+		`codemode.CallTool("filesystem.write"`,
+		`"path": "hello-world-go/main.go"`,
+		`fmt.Println(\"Hello, World!\")`,
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(payload.Code, want) {
+			t.Fatalf("normalized code missing %q:\n%s", want, payload.Code)
+		}
+	}
+
+	if strings.Contains(payload.Code, "content := package main") {
+		t.Fatalf("normalized code still contains invalid inline package assignment:\n%s", payload.Code)
+	}
+}
+
+func codeModeGenerationPromptForTest(query string) string {
+	return "Generate a Go snippet that uses ONLY the following UTCP tools:\n\nUSER QUERY:\n" +
+		strconv.Quote(query) +
+		"\n\nTOOL SPECS:\nfilesystem.mkdir filesystem.write shell.run\n\nRespond ONLY in JSON:\n{\n  \"code\": \"<go snippet>\",\n  \"stream\": false\n}"
 }
 
 func TestNormalizeCodeModeSnippetRepairsBuildAndRunSnippet(t *testing.T) {

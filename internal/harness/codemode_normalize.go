@@ -3,7 +3,9 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Protocol-Lattice/go-agent/src/models"
@@ -22,7 +24,7 @@ func (m normalizingModel) Generate(ctx context.Context, prompt string) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return normalizeModelOutput(out), nil
+	return normalizeModelOutputForPrompt(out, prompt), nil
 }
 
 func (m normalizingModel) GenerateWithFiles(ctx context.Context, prompt string, files []models.File) (any, error) {
@@ -38,11 +40,15 @@ func (m normalizingModel) GenerateStream(ctx context.Context, prompt string) (<-
 }
 
 func normalizeModelOutput(out any) any {
+	return normalizeModelOutputForPrompt(out, "")
+}
+
+func normalizeModelOutputForPrompt(out any, prompt string) any {
 	s, ok := out.(string)
 	if !ok {
 		return out
 	}
-	return NormalizeCodeModeSnippet(s)
+	return normalizeCodeModeSnippetForPrompt(s, prompt)
 }
 
 var (
@@ -54,10 +60,18 @@ var (
 )
 
 func NormalizeCodeModeSnippet(src string) string {
+	return normalizeCodeModeSnippetForPrompt(src, "")
+}
+
+func normalizeCodeModeSnippetForPrompt(src string, prompt string) string {
 	original := src
 	src = strings.TrimSpace(src)
 
 	if normalized, ok := normalizeCodeModeRunCodeToolChoiceJSON(src); ok {
+		return normalized
+	}
+
+	if normalized, ok := normalizeGeneratedCodeModeJSON(src, prompt); ok {
 		return normalized
 	}
 
@@ -82,6 +96,207 @@ func NormalizeCodeModeSnippet(src string) string {
 	}
 
 	return wrapCodeModeBody(src)
+}
+
+func normalizeGeneratedCodeModeJSON(src string, prompt string) (string, bool) {
+	if !isCodeModeGenerationPrompt(prompt) {
+		return "", false
+	}
+
+	for _, candidate := range jsonObjectCandidates(src) {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(candidate), &payload); err != nil {
+			continue
+		}
+
+		code, ok := payload["code"].(string)
+		if !ok {
+			continue
+		}
+
+		payload["code"] = normalizeGeneratedCodeModeCode(prompt, code)
+
+		normalized, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+
+		return string(normalized), true
+	}
+
+	return "", false
+}
+
+func isCodeModeGenerationPrompt(prompt string) bool {
+	return strings.Contains(prompt, "Generate a Go snippet that uses ONLY the following UTCP tools") &&
+		strings.Contains(prompt, "Respond ONLY in JSON") &&
+		strings.Contains(prompt, `"code": "<go snippet>"`)
+}
+
+func normalizeGeneratedCodeModeCode(prompt string, code string) string {
+	if source, ok := extractGoMainProgram(code); ok {
+		return wrapCodeModeBody(goProgramWriteSnippet(prompt, code, source))
+	}
+
+	if source, ok := extractBareGoMainProgram(code); ok {
+		return wrapCodeModeBody(goProgramWriteSnippet(prompt, code, source))
+	}
+
+	return normalizeCodeModeSnippetForPrompt(code, "")
+}
+
+func extractGoMainProgram(code string) (string, bool) {
+	trimmed := strings.TrimSpace(code)
+	if strings.HasPrefix(trimmed, "package main") && strings.Contains(trimmed, "func main") {
+		return ensureTrailingNewline(trimmed), true
+	}
+	return "", false
+}
+
+func extractBareGoMainProgram(code string) (string, bool) {
+	lines := strings.Split(code, "\n")
+	start := -1
+	for i, line := range lines {
+		if idx := strings.Index(line, "package main"); idx >= 0 {
+			start = i
+			lines[i] = line[idx:]
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+
+	end := len(lines)
+	braceDepth := 0
+	seenMain := false
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		if strings.Contains(line, "func main") {
+			seenMain = true
+		}
+		if seenMain {
+			braceDepth += strings.Count(line, "{")
+			braceDepth -= strings.Count(line, "}")
+			if braceDepth == 0 && strings.Contains(line, "}") {
+				end = i + 1
+				break
+			}
+		}
+	}
+
+	source := strings.TrimSpace(strings.Join(lines[start:end], "\n"))
+	if !strings.Contains(source, "func main") {
+		return "", false
+	}
+
+	return ensureTrailingNewline(source), true
+}
+
+func goProgramWriteSnippet(prompt string, generatedCode string, source string) string {
+	dir := inferGoProgramDir(prompt, generatedCode)
+	path := "main.go"
+	if dir != "" {
+		path = dir + "/main.go"
+	}
+
+	var b strings.Builder
+	b.WriteString("var err error\n")
+
+	if dir != "" {
+		b.WriteString("mkdirResult, err := codemode.CallTool(\"filesystem.mkdir\", map[string]any{\n")
+		fmt.Fprintf(&b, "    \"path\": %s,\n", strconv.Quote(dir))
+		b.WriteString("})\n")
+		b.WriteString("if err != nil {\n")
+		b.WriteString("    return err\n")
+		b.WriteString("}\n\n")
+	}
+
+	fmt.Fprintf(&b, "content := %s\n\n", strconv.Quote(source))
+	b.WriteString("writeResult, err := codemode.CallTool(\"filesystem.write\", map[string]any{\n")
+	fmt.Fprintf(&b, "    \"path\": %s,\n", strconv.Quote(path))
+	b.WriteString("    \"content\": content,\n")
+	b.WriteString("})\n")
+	b.WriteString("if err != nil {\n")
+	b.WriteString("    return err\n")
+	b.WriteString("}\n\n")
+	if dir != "" {
+		fmt.Fprintf(&b, "return map[string]any{\"mkdir\": mkdirResult, \"write\": writeResult, \"path\": %s}", strconv.Quote(path))
+		return b.String()
+	}
+	fmt.Fprintf(&b, "return map[string]any{\"write\": writeResult, \"path\": %s}", strconv.Quote(path))
+
+	return b.String()
+}
+
+func inferGoProgramDir(prompt string, generatedCode string) string {
+	if dir := inferDirFromGeneratedCode(generatedCode); dir != "" {
+		return dir
+	}
+
+	query := extractCodeModeUserQuery(prompt)
+	lowerQuery := strings.ToLower(query)
+	if strings.Contains(lowerQuery, "hello-world-go") {
+		return "hello-world-go"
+	}
+	if (strings.Contains(lowerQuery, "new folder") || strings.Contains(lowerQuery, "new directory")) &&
+		(strings.Contains(lowerQuery, "hello") || strings.Contains(lowerQuery, "go")) {
+		return "hello-world-go"
+	}
+
+	for _, re := range []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(?:folder|directory)\s+(?:named|called)\s+([a-zA-Z0-9._-]+)`),
+		regexp.MustCompile(`(?i)\bin\s+(?:a\s+)?([a-zA-Z0-9._-]+)\s+(?:folder|directory)\b`),
+	} {
+		if match := re.FindStringSubmatch(query); len(match) == 2 {
+			return sanitizeRelativeDir(match[1])
+		}
+	}
+
+	return ""
+}
+
+func inferDirFromGeneratedCode(code string) string {
+	re := regexp.MustCompile(`codemode\.CallTool\(\s*"filesystem\.mkdir"\s*,\s*map\[string\]any\s*\{[^}]*"path"\s*:\s*"([^"]+)"`)
+	if match := re.FindStringSubmatch(code); len(match) == 2 {
+		return sanitizeRelativeDir(match[1])
+	}
+	return ""
+}
+
+func extractCodeModeUserQuery(prompt string) string {
+	re := regexp.MustCompile(`(?s)USER QUERY:\s*\n(".*?")\s*\n`)
+	match := re.FindStringSubmatch(prompt)
+	if len(match) != 2 {
+		return ""
+	}
+
+	query, err := strconv.Unquote(match[1])
+	if err != nil {
+		return ""
+	}
+	return query
+}
+
+func sanitizeRelativeDir(dir string) string {
+	dir = strings.Trim(strings.TrimSpace(dir), `"'`)
+	dir = strings.Trim(dir, "/")
+	switch strings.ToLower(dir) {
+	case "new", "a", "an", "the":
+		return ""
+	}
+	if dir == "" || strings.Contains(dir, "..") || strings.ContainsAny(dir, `\:*?[]`) {
+		return ""
+	}
+	return dir
+}
+
+func ensureTrailingNewline(src string) string {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return src
+	}
+	return src + "\n"
 }
 
 func normalizeCodeModeRunCodeToolChoiceJSON(src string) (string, bool) {
