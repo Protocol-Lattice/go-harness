@@ -12,6 +12,7 @@ import (
 	"github.com/Protocol-Lattice/go-agent/src/memory"
 	"github.com/Protocol-Lattice/go-agent/src/models"
 	"github.com/universal-tool-calling-protocol/go-utcp"
+	"github.com/universal-tool-calling-protocol/go-utcp/src/plugins/codemode"
 )
 
 type Runtime struct {
@@ -60,6 +61,7 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 		Memory:       mem,
 		SystemPrompt: systemPrompt,
 		UTCPClient:   client,
+		CodeMode:     codemode.NewCodeModeUTCP(client, model),
 
 		AllowUnsafeTools: true,
 	})
