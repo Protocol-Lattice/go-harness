@@ -1,0 +1,8 @@
+[
+  {
+    "provider_type": "cli",
+    "name": "filesystem",
+    "command_name": "../../bin/filesystem/filesystem --root .",
+    "execute_command": "../../bin/filesystem/filesystem --root . {{.ToolName}} {{json .Inputs}}"
+  }
+]

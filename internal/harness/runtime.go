@@ -11,6 +11,7 @@ import (
 	agent "github.com/Protocol-Lattice/go-agent"
 	"github.com/Protocol-Lattice/go-agent/src/memory"
 	"github.com/Protocol-Lattice/go-agent/src/models"
+	"github.com/universal-tool-calling-protocol/go-utcp"
 )
 
 type Runtime struct {
@@ -42,13 +43,23 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 		memory.NewMemoryBankWithStore(mdStore),
 		16,
 	)
-
+	client, err := utcp.NewUTCPClient(
+		context.Background(), &utcp.UtcpClientConfig{
+			ProvidersFilePath: "providers.json",
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
 	systemPrompt := BuildSystemPrompt(skills, cfg.Workspace)
 
 	a, err := agent.New(agent.Options{
 		Model:        model,
 		Memory:       mem,
 		SystemPrompt: systemPrompt,
+		UTCPClient:   client,
 
 		AllowUnsafeTools: true,
 	})
@@ -155,19 +166,21 @@ func (r *Runtime) RunOnce(ctx context.Context, prompt string, out io.Writer) err
 }
 
 func (r *Runtime) ListTools(out io.Writer) error {
-	tools := r.agent.Tools()
+	tools, err := r.agent.UTCPClient.SearchTools("", 100)
+	if err != nil {
+		return err
+	}
 	if len(tools) == 0 {
 		fmt.Fprintln(out, "no tools registered")
 		return nil
 	}
 
 	for _, t := range tools {
-		spec := t.Spec()
-		if spec.Description == "" {
-			fmt.Fprintf(out, "- %s\n", spec.Name)
+		if t.Description == "" {
+			fmt.Fprintf(out, "- %s\n", t.Name)
 			continue
 		}
-		fmt.Fprintf(out, "- %s\n  %s\n", spec.Name, spec.Description)
+		fmt.Fprintf(out, "- %s\n  %s\n", t.Name, t.Description)
 	}
 
 	return nil
