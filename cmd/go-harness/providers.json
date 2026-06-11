@@ -2,7 +2,22 @@
   {
     "provider_type": "cli",
     "name": "filesystem",
-    "command_name": "../../bin/filesystem/filesystem --root .",
+    "command_name": "../../bin/filesystem/filesystem",
+    "discover_command": "../../bin/filesystem/filesystem --root . list-tools",
     "execute_command": "../../bin/filesystem/filesystem --root . {{.ToolName}} {{json .Inputs}}"
+  },
+  {
+    "provider_type": "cli",
+    "name": "git",
+    "command_name": "../../bin/git/git",
+    "discover_command": "../../bin/git/git --root . list-tools",
+    "execute_command": "../../bin/git/git --root . {{.ToolName}} {{json .Inputs}}"
+  },
+  {
+    "provider_type": "cli",
+    "name": "shell",
+    "command_name": "../../bin/shell/shell",
+    "discover_command": "../../bin/shell/shell --root . list-tools",
+    "execute_command": "../../bin/shell/shell --root . {{.ToolName}} {{json .Inputs}}"
   }
 ]
