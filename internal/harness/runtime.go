@@ -34,7 +34,6 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 		return nil, fmt.Errorf("create model provider: %w", err)
 	}
 
-	// ADD IT HERE
 	mdStore, err := memory.NewMarkdownStore(cfg.MemoryDir)
 	if err != nil {
 		return nil, fmt.Errorf("create markdown memory store: %w", err)
@@ -46,7 +45,7 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 	)
 	client, err := utcp.NewUTCPClient(
 		context.Background(), &utcp.UtcpClientConfig{
-			ProvidersFilePath: "providers.json",
+			ProvidersFilePath: cfg.ProvidersFile,
 		},
 		nil,
 		nil,
@@ -84,7 +83,7 @@ func (r *Runtime) RunREPL(ctx context.Context, in io.Reader, out io.Writer) erro
 	scanner := bufio.NewScanner(in)
 
 	fmt.Fprintln(out, "agentic-tui ready")
-	fmt.Fprintln(out, "commands: /exit, /tools, /skills, /approve, /noapprove")
+	r.printREPLHelp(out)
 	fmt.Fprintln(out)
 
 	for {
@@ -99,51 +98,78 @@ func (r *Runtime) RunREPL(ctx context.Context, in io.Reader, out io.Writer) erro
 			continue
 		}
 
-		switch line {
-		case "/exit", "/quit":
-			return nil
-
-		case "/approve":
-			r.gate.AutoApprove = true
-			fmt.Fprintln(out, "auto-approve enabled")
-			continue
-
-		case "/noapprove":
-			r.gate.AutoApprove = false
-			fmt.Fprintln(out, "auto-approve disabled")
-			continue
-
-		case "/tools":
-			for _, t := range r.agent.Tools() {
-				spec := t.Spec()
-				fmt.Fprintf(out, "- %s: %s\n", spec.Name, spec.Description)
-			}
-			continue
-
-		case "/skills":
-			skills, err := LoadSkills(ctx, r.cfg.SkillsDir)
-			if err != nil {
+		if strings.HasPrefix(line, "/") {
+			if err := r.runSlashCommand(ctx, line, out); err != nil {
+				if err == errExitREPL {
+					return nil
+				}
 				fmt.Fprintf(out, "error: %v\n", err)
-				continue
-			}
-			for _, s := range skills {
-				fmt.Fprintf(out, "- %s (%s)\n", s.Name, s.Path)
 			}
 			continue
 		}
 
-		reqCtx, cancel := context.WithTimeout(ctx, r.cfg.Timeout)
-		resp, err := r.agent.Generate(reqCtx, r.cfg.SessionID, line)
-		cancel()
-
-		if err != nil {
+		if err := r.RunOnce(ctx, line, out); err != nil {
 			fmt.Fprintf(out, "error: %v\n", err)
-			continue
 		}
-
-		fmt.Fprintf(out, "\n%s\n\n", strings.TrimSpace(resp.(string)))
 	}
 }
+
+func (r *Runtime) runSlashCommand(ctx context.Context, line string, out io.Writer) error {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return nil
+	}
+
+	cmd := strings.ToLower(fields[0])
+	args := fields[1:]
+
+	switch cmd {
+	case "/exit", "/quit", "/q":
+		return errExitREPL
+
+	case "/help", "/h", "/?":
+		r.printREPLHelp(out)
+		return nil
+
+	case "/approve":
+		r.gate.AutoApprove = true
+		fmt.Fprintln(out, "auto-approve enabled")
+		return nil
+
+	case "/noapprove", "/no-approve":
+		r.gate.AutoApprove = false
+		fmt.Fprintln(out, "auto-approve disabled")
+		return nil
+
+	case "/tools":
+		if len(args) > 0 && args[0] != "list" {
+			return fmt.Errorf("usage: /tools [list]")
+		}
+		return r.ListTools(out)
+
+	case "/skills":
+		if len(args) > 0 && args[0] != "list" {
+			return fmt.Errorf("usage: /skills [list]")
+		}
+		return r.ListSkills(ctx, out)
+
+	case "/run":
+		prompt := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+		if prompt == "" {
+			return fmt.Errorf("usage: /run <prompt>")
+		}
+		return r.RunOnce(ctx, prompt, out)
+
+	default:
+		return fmt.Errorf("unknown command %q; use /help", fields[0])
+	}
+}
+
+func (r *Runtime) printREPLHelp(out io.Writer) {
+	fmt.Fprintln(out, "commands: /help, /exit, /tools [list], /skills [list], /approve, /noapprove, /run <prompt>")
+}
+
+var errExitREPL = fmt.Errorf("exit repl")
 
 func Run(ctx context.Context, cfg Config) error {
 	rt, err := NewRuntime(ctx, cfg, os.Stdin, os.Stdout)
@@ -163,7 +189,7 @@ func (r *Runtime) RunOnce(ctx context.Context, prompt string, out io.Writer) err
 		return err
 	}
 
-	fmt.Fprintln(out, strings.TrimSpace(resp.(string)))
+	fmt.Fprintln(out, strings.TrimSpace(fmt.Sprint(resp)))
 	return nil
 }
 
@@ -183,6 +209,27 @@ func (r *Runtime) ListTools(out io.Writer) error {
 			continue
 		}
 		fmt.Fprintf(out, "- %s\n  %s\n", t.Name, t.Description)
+	}
+
+	return nil
+}
+
+func (r *Runtime) ListSkills(ctx context.Context, out io.Writer) error {
+	skills, err := LoadSkills(ctx, r.cfg.SkillsDir)
+	if err != nil {
+		return err
+	}
+	if len(skills) == 0 {
+		fmt.Fprintln(out, "no skills loaded")
+		return nil
+	}
+
+	for _, s := range skills {
+		if s.Description == "" {
+			fmt.Fprintf(out, "- %s\t%s\n", s.Name, s.Path)
+			continue
+		}
+		fmt.Fprintf(out, "- %s\t%s\n  %s\n", s.Name, s.Path, s.Description)
 	}
 
 	return nil
