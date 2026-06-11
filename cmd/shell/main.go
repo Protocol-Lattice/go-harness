@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ type Tool struct {
 
 type RunInput struct {
 	Command        string            `json:"command"`
+	Argv           []string          `json:"argv,omitempty"`
 	Args           []string          `json:"args,omitempty"`
 	CWD            string            `json:"cwd,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
@@ -59,6 +61,11 @@ func main() {
 		writeError("", "", "", errors.New("missing command"), 2)
 		os.Exit(2)
 	}
+	args, err = normalizeUTCPCallArgs(args, os.Stdin)
+	if err != nil {
+		writeError("", "", "", err, 2)
+		os.Exit(2)
+	}
 
 	if args[0] == "list-tools" {
 		writeJSON(tools())
@@ -77,6 +84,7 @@ func main() {
 
 	var in RunInput
 	mustDecode([]byte(args[1]), &in)
+	in = normalizeRunInput(in)
 
 	if err := validateInput(in); err != nil {
 		writeError("shell.run", "", "", err, 2)
@@ -103,12 +111,29 @@ func parseArgs(args []string) (string, []string, error) {
 	return absRoot, fs.Args(), nil
 }
 
+func normalizeUTCPCallArgs(args []string, stdin io.Reader) ([]string, error) {
+	if len(args) == 0 || args[0] != "call" {
+		return args, nil
+	}
+	if len(args) < 3 {
+		return nil, errors.New("usage: call <provider> <tool>")
+	}
+
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return nil, fmt.Errorf("read stdin json input: %w", err)
+	}
+
+	return []string{args[2], strings.TrimSpace(string(raw))}, nil
+}
+
 func tools() []Tool {
 	return []Tool{
 		{
 			Name:        "shell.run",
 			Description: "Run a non-interactive command inside the workspace root. Uses argv mode by default; shell mode requires HARNESS_ALLOW_SHELL=1.",
 			Inputs: map[string]any{
+				"argv":            "optional full argv list, e.g. [\"go\", \"test\", \"./...\"]",
 				"command":         "required executable name, e.g. go",
 				"args":            "optional argv list, e.g. [\"test\", \"./...\"]",
 				"cwd":             "optional working directory relative to root",
@@ -118,6 +143,18 @@ func tools() []Tool {
 			},
 		},
 	}
+}
+
+func normalizeRunInput(in RunInput) RunInput {
+	if strings.TrimSpace(in.Command) != "" || len(in.Argv) == 0 {
+		return in
+	}
+
+	in.Command = in.Argv[0]
+	if len(in.Argv) > 1 {
+		in.Args = append([]string{}, in.Argv[1:]...)
+	}
+	return in
 }
 
 func validateInput(in RunInput) error {

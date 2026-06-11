@@ -29,10 +29,11 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 		return nil, err
 	}
 
-	model, err := models.NewLLMProvider(ctx, cfg.Provider, cfg.Model, "")
+	baseModel, err := models.NewLLMProvider(ctx, cfg.Provider, cfg.Model, "")
 	if err != nil {
 		return nil, fmt.Errorf("create model provider: %w", err)
 	}
+	model := newNormalizingModel(baseModel)
 
 	mdStore, err := memory.NewMarkdownStore(cfg.MemoryDir)
 	if err != nil {

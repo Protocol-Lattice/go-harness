@@ -1,6 +1,8 @@
 package harness
 
-import "strings"
+import (
+	"strings"
+)
 
 func BuildSystemPrompt(skills []Skill, workspace string) string {
 	var b strings.Builder
@@ -23,161 +25,133 @@ Tool usage:
 - Do not invent tools.
 - Do not call tools that are not listed in the available tools.
 - Tool inputs must exactly match discovered tool schemas.
-- If a tool schema does not include a field, do not pass that field.
-- If a requested task cannot be done with the available tool schemas, explain the limitation instead of guessing.
 
-CodeMode output contract:
-- When CodeMode is requested, output ONLY raw Go statements.
-- Do not output markdown.
-- Do not wrap the snippet in triple backticks.
-- Do not include explanations before or after the snippet.
-- The snippet is inserted into an existing Go function body.
-- Therefore, top-level declarations are forbidden.
-
-CodeMode forbidden syntax:
-- Do not emit package declarations.
-- Do not emit import blocks.
-- Do not emit func main.
-- Do not emit any function declarations.
-- Do not emit type declarations.
-- Do not emit const declarations.
-- Do not emit top-level var declarations.
-- Do not start with "var err error".
-- Do not use raw string literals with backticks.
-- Do not call codemode.run_code.
-- Do not use codemode.Sprintf.
-- Do not use codemode.Errorf.
-- Do not use codemode.Must.
-- Do not use any codemode.* helper except codemode.CallTool.
-
-CodeMode allowed runtime identifiers:
-- ctx
-- codemode
-- __out
-
-CodeMode tool calls:
-- The only allowed codemode selector is codemode.CallTool.
-- Tool calls must use this shape:
-  result, err := codemode.CallTool("provider.tool", map[string]any{...})
-- Reuse err with assignment after the first declaration:
-  result, err = codemode.CallTool("provider.tool", map[string]any{...})
-- Never call tools that are not listed in available tools.
-- Tool input maps must exactly match discovered schemas.
-
-CodeMode error handling:
-- Always handle every error immediately.
-- On errors, assign __out to:
-  map[string]any{"ok": false, "step": "...", "error": err.Error()}
-- Then return.
-- Do not use "return __out".
-
-CodeMode final output:
+CodeMode rules:
+- CodeMode snippets are Go statements executed inside an existing function.
+- Never include "package main".
+- Never include "func main".
+- Never include import blocks.
+- Never wrap the snippet in markdown fences.
+- Never use "return __out".
+- Never use "return nil".
+- To finish early, assign __out and use plain "return".
 - Always assign the final result to __out.
-- Prefer JSON-compatible values only:
-  string, bool, numbers, []any, map[string]any, nil.
+- Use only discovered tool names.
+- Use only fields from the discovered tool schemas.
+- Never guess tool input fields.
+- Never say a tool schema is empty unless it was actually shown as empty.
+- Do not use "command" for shell.run unless the discovered schema explicitly contains "command".
+- Prefer shell.run with argv when available:
+  codemode.CallTool("shell.run", map[string]any{
+      "argv": []string{"go", "run", "main.go"},
+  })
+- Prefer filesystem.write with path/content when available:
+  codemode.CallTool("filesystem.write", map[string]any{
+      "path": "main.go",
+      "content": "...",
+  })
 
-CodeMode file-content rules:
-- Backtick raw strings are forbidden inside CodeMode snippets.
-- Use only double-quoted strings with \n escapes for file contents.
-- Build multiline file contents with string concatenation.
-- Never place package main or func main directly in the snippet.
-- package main and func main may appear only inside quoted string content passed to filesystem.write.
-
-Forbidden CodeMode examples:
-__out = codemode.Sprintf("created %s", name)
-__out = codemode.Errorf("failed: %v", err)
-codemode.CallTool("codemode.run_code", map[string]any{})
+Correct CodeMode error handling pattern:
 var err error
+
+result, err := codemode.CallTool("some.tool", map[string]any{
+    "field": "value",
+})
+if err != nil {
+    __out = err
+    return
+}
+
+__out = result
+
+Correct hello world example:
+var err error
+var writeResult any
+var runResult any
+
 content := ` + "`" + `package main
-func main() {}
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello, World!")
+}
 ` + "`" + `
 
-Valid CodeMode example:
-folderName := "hello_app"
-
-goContent := "package main\n\n" +
-	"import \"fmt\"\n\n" +
-	"func main() {\n" +
-	"\tfmt.Println(\"Hello, World!\")\n" +
-	"}\n"
-
-_, err := codemode.CallTool("filesystem.mkdir", map[string]any{
-	"path": folderName,
+writeResult, err = codemode.CallTool("filesystem.write", map[string]any{
+    "path":    "main.go",
+    "content": content,
 })
 if err != nil {
-	__out = map[string]any{"ok": false, "step": "mkdir", "error": err.Error()}
-	return
+    __out = err
+    return
 }
 
-filePath := folderName + "/main.go"
-
-_, err = codemode.CallTool("filesystem.write", map[string]any{
-	"path": filePath,
-	"content": goContent,
+runResult, err = codemode.CallTool("shell.run", map[string]any{
+    "argv": []string{"go", "run", "main.go"},
 })
 if err != nil {
-	__out = map[string]any{"ok": false, "step": "write main.go", "error": err.Error()}
-	return
-}
-
-modContent := "module hello_app\n\n" +
-	"go 1.22\n"
-
-_, err = codemode.CallTool("filesystem.write", map[string]any{
-	"path": folderName + "/go.mod",
-	"content": modContent,
-})
-if err != nil {
-	__out = map[string]any{"ok": false, "step": "write go.mod", "error": err.Error()}
-	return
-}
-
-runRes, err := codemode.CallTool("shell.run", map[string]any{
-	"command": "go",
-	"args": []any{"run", "."},
-	"cwd": folderName,
-})
-if err != nil {
-	__out = map[string]any{"ok": false, "step": "go run", "error": err.Error()}
-	return
+    __out = err
+    return
 }
 
 __out = map[string]any{
-	"ok": true,
-	"message": "created and ran hello app",
-	"folder": folderName,
-	"file": filePath,
-	"run": runRes,
+    "write_file_status": writeResult,
+    "run_output":        runResult,
 }
 
-Workspace root:
+Forbidden CodeMode examples:
+- package main
+- func main()
+- import "fmt"
+- return __out
+- return nil
+- shell.run with "command" unless the schema explicitly contains command
+
+Planning:
+- If a task needs files changed, use tools instead of only explaining.
+- If the user asks to create a project, create files first, then run validation.
+- If a command fails, inspect the error and make the smallest fix.
 `)
-	b.WriteString(workspace)
-	b.WriteString("\n\n")
 
-	if len(skills) == 0 {
-		b.WriteString("Loaded skills: none.\n")
-		return b.String()
+	if strings.TrimSpace(workspace) != "" {
+		b.WriteString("\nWorkspace:\n")
+		b.WriteString(workspace)
+		b.WriteString("\n")
 	}
 
-	b.WriteString("Loaded skills:\n")
-	for _, s := range skills {
-		b.WriteString("\n--- skill: ")
-		b.WriteString(s.Name)
-		b.WriteString(" ---\n")
+	if len(skills) > 0 {
+		b.WriteString("\nLoaded skills:\n")
+		for _, skill := range skills {
+			b.WriteString("- ")
+			b.WriteString(skill.Name)
 
-		if s.Description != "" {
-			b.WriteString("Description: ")
-			b.WriteString(s.Description)
+			if strings.TrimSpace(skill.Description) != "" {
+				b.WriteString(": ")
+				b.WriteString(strings.TrimSpace(skill.Description))
+			}
+
 			b.WriteString("\n")
 		}
 
-		body := strings.TrimSpace(s.Body)
-		if body != "" {
-			b.WriteString(body)
-			b.WriteString("\n")
-		}
+		b.WriteString(`
+Skill usage:
+- Use skills only when relevant to the user's task.
+- Do not mention irrelevant skills.
+- Prefer the most specific loaded skill for implementation guidance.
+`)
 	}
+
+	b.WriteString(`
+Response format:
+- If you used tools, summarize what changed and what was verified.
+- If something failed, show the exact error and the next concrete fix.
+- Keep final answers short unless the user asks for details.
+`)
 
 	return b.String()
+}
+
+func BuildPrompt(skills []Skill, workspace string) string {
+	return BuildSystemPrompt(skills, workspace)
 }

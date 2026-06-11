@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,6 +75,11 @@ func main() {
 
 	if len(args) == 0 {
 		writeError("", "", "", errors.New("missing command"), 2)
+		os.Exit(2)
+	}
+	args, err = normalizeUTCPCallArgs(args, os.Stdin)
+	if err != nil {
+		writeError("", "", "", err, 2)
 		os.Exit(2)
 	}
 
@@ -159,6 +165,22 @@ func parseArgs(args []string) (string, []string, error) {
 	}
 
 	return absRoot, fs.Args(), nil
+}
+
+func normalizeUTCPCallArgs(args []string, stdin io.Reader) ([]string, error) {
+	if len(args) == 0 || args[0] != "call" {
+		return args, nil
+	}
+	if len(args) < 3 {
+		return nil, errors.New("usage: call <provider> <tool>")
+	}
+
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return nil, fmt.Errorf("read stdin json input: %w", err)
+	}
+
+	return []string{args[2], strings.TrimSpace(string(raw))}, nil
 }
 
 func tools() []Tool {

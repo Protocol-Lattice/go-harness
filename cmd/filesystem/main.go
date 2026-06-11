@@ -56,6 +56,11 @@ func main() {
 	}
 
 	args := flag.Args()
+	args, err = normalizeUTCPCallArgs(args, os.Stdin)
+	if err != nil {
+		writeErr("", "", err)
+		os.Exit(2)
+	}
 	if len(args) == 0 {
 		writeErr("", "", errors.New("missing command"))
 		os.Exit(2)
@@ -113,6 +118,22 @@ func main() {
 		writeErr(args[0], "", fmt.Errorf("unknown tool %q", args[0]))
 		os.Exit(2)
 	}
+}
+
+func normalizeUTCPCallArgs(args []string, stdin io.Reader) ([]string, error) {
+	if len(args) == 0 || args[0] != "call" {
+		return args, nil
+	}
+	if len(args) < 3 {
+		return nil, errors.New("usage: call <provider> <tool>")
+	}
+
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return nil, fmt.Errorf("read stdin json input: %w", err)
+	}
+
+	return []string{args[2], strings.TrimSpace(string(raw))}, nil
 }
 
 func tools() []Tool {

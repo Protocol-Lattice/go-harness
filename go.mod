@@ -2,7 +2,7 @@ module github.com/Protocol-Lattice/go-harness
 
 go 1.26.3
 
-require github.com/Protocol-Lattice/go-agent v1.12.0
+require github.com/Protocol-Lattice/go-agent v1.12.1
 
 require (
 	cloud.google.com/go v0.115.0 // indirect
@@ -74,7 +74,7 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/traefik/yaegi v0.16.1 // indirect
-	github.com/universal-tool-calling-protocol/go-utcp v1.10.13 // indirect
+	github.com/universal-tool-calling-protocol/go-utcp v1.11.1 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
