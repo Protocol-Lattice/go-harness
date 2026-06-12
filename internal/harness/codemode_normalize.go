@@ -55,6 +55,7 @@ var (
 	fencedCodeBlockRE        = regexp.MustCompile("(?s)```(?:go|golang)?\\s*(.*?)\\s*```")
 	fencedAnyBlockRE         = regexp.MustCompile("(?s)```(?:[a-zA-Z0-9_-]+)?\\s*(.*?)\\s*```")
 	callToolAssignLineRE     = regexp.MustCompile(`(?m)^(\s*)(?:_|result|runResult|runRes)\s*,\s*err\s*:?=\s*codemode\.CallTool`)
+	callToolBareObjectArgRE  = regexp.MustCompile(`codemode\.CallTool\(\s*("[^"]+")\s*,\s*\{`)
 	shellRunStringSliceArgRE = regexp.MustCompile(`codemode\.CallTool\(\s*"shell\.run"\s*,\s*\[\]string\s*\{([^}]*)\}\s*\)`)
 	bareReturnRE             = regexp.MustCompile(`(?m)^\s*return\s*$`)
 )
@@ -402,6 +403,7 @@ func normalizeCommonCodeModeMistakes(src string) string {
 	src = strings.ReplaceAll(src, "runRes", "result")
 
 	src = normalizeInventedCodeModeHelpers(src)
+	src = normalizeCallToolBareObjectArgs(src)
 	src = normalizeMissingMapEntryCommas(src)
 	src = normalizeShellRunStringSlice(src)
 	src = normalizeCallToolAssignments(src)
@@ -458,6 +460,13 @@ func normalizeShellRunStringSlice(src string) string {
 	return shellRunStringSliceArgRE.ReplaceAllString(
 		src,
 		`codemode.CallTool("shell.run", map[string]any{"argv": []string{$1}})`,
+	)
+}
+
+func normalizeCallToolBareObjectArgs(src string) string {
+	return callToolBareObjectArgRE.ReplaceAllString(
+		src,
+		`codemode.CallTool($1, map[string]any{`,
 	)
 }
 

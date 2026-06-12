@@ -33,7 +33,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return app.chat(ctx, args[1:])
 
 	case "tui":
-		return app.chat(ctx, args[1:])
+		return app.tui(ctx, args[1:])
 
 	case "run":
 		return app.runTask(ctx, args[1:])

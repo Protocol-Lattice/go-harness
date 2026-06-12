@@ -18,6 +18,20 @@ func (a *App) chat(ctx context.Context, args []string) error {
 	return harness.Run(ctx, cfg)
 }
 
+func (a *App) tui(ctx context.Context, args []string) error {
+	cfg, _, err := a.baseFlags("tui", args)
+	if err != nil {
+		return err
+	}
+
+	rt, err := harness.NewRuntime(ctx, cfg, a.stdin, a.stdout)
+	if err != nil {
+		return err
+	}
+
+	return rt.RunTaskLoop(ctx, a.stdin, a.stdout)
+}
+
 func (a *App) runTask(ctx context.Context, args []string) error {
 	cfg, fs, err := a.baseFlags("run", args)
 	if err != nil {

@@ -92,6 +92,33 @@ func TestNormalizeCodeModeSnippetExtractsJSONCodeAndRepairsShellRunArgv(t *testi
 	}
 }
 
+func TestNormalizeCodeModeSnippetRepairsBareObjectCallToolArgs(t *testing.T) {
+	input := `_, err := codemode.CallTool("filesystem.mkdir", {"path": "mcp-filesystem-server"})
+if err != nil {
+    __out = err
+    return __out
+}
+
+__out = "created"`
+
+	got := NormalizeCodeModeSnippet(input)
+
+	mustContain := []string{
+		`result, err := codemode.CallTool("filesystem.mkdir", map[string]any{"path": "mcp-filesystem-server"})`,
+		"return err",
+		`return "created"`,
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(got, want) {
+			t.Fatalf("normalized snippet missing %q:\n%s", want, got)
+		}
+	}
+
+	if strings.Contains(got, `, {"path"`) {
+		t.Fatalf("normalized snippet still contains bare object arg:\n%s", got)
+	}
+}
+
 func TestNormalizeModelOutputRepairsNestedCodeModeRunCodeArgument(t *testing.T) {
 	code := `_, err := codemode.CallTool("filesystem.write", map[string]any{
     "path": "main.go",
