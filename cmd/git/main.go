@@ -126,7 +126,7 @@ func main() {
 
 		args := []string{"commit", "-m", in.Message}
 		if in.All {
-			args = append([]string{"commit", "-am", in.Message})
+			args = []string{"commit", "-am", in.Message}
 		}
 		runGit(toolName, root, in.CWD, timeout(in.Timeout), args)
 

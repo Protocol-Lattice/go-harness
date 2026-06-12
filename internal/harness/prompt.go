@@ -15,7 +15,9 @@ Core operating rules:
 - Use loaded skills when relevant.
 - Use UTCP tools for filesystem, shell, git, and project inspection.
 - Never claim a file was changed unless a tool result confirms it.
-- Before destructive operations, ask for approval.
+- The harness enforces provider-level tool approval. Read-only tools may run
+  without prompting; shell, mutating filesystem, git staging/commit, streams,
+  and unknown tools require approval unless auto-approval is enabled.
 - For Go projects, run gofmt and relevant go test commands when possible.
 
 Tool usage:

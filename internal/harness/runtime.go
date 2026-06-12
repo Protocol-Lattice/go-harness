@@ -19,7 +19,7 @@ import (
 type Runtime struct {
 	cfg         Config
 	agent       *agent.Agent
-	gate        ApprovalGate
+	gate        *ApprovalGate
 	memoryStore *memory.MarkdownStore
 }
 
@@ -58,14 +58,20 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 	if err != nil {
 		return nil, err
 	}
+	gate := &ApprovalGate{
+		AutoApprove: cfg.AutoApprove,
+		In:          stdin,
+		Out:         stdout,
+	}
+	approvedClient := NewApprovingUTCPClient(client, gate, DefaultToolApprovalPolicy())
 	systemPrompt := BuildSystemPrompt(skills, cfg.Workspace)
 
 	a, err := agent.New(agent.Options{
 		Model:        model,
 		Memory:       mem,
 		SystemPrompt: systemPrompt,
-		UTCPClient:   client,
-		CodeMode:     codemode.NewCodeModeUTCP(client, model),
+		UTCPClient:   approvedClient,
+		CodeMode:     codemode.NewCodeModeUTCP(approvedClient, model),
 
 		AllowUnsafeTools: true,
 	})
@@ -77,11 +83,7 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 		cfg:         cfg,
 		agent:       a,
 		memoryStore: mdStore,
-		gate: ApprovalGate{
-			AutoApprove: cfg.AutoApprove,
-			In:          stdin,
-			Out:         stdout,
-		},
+		gate:        gate,
 	}, nil
 }
 
@@ -138,11 +140,17 @@ func (r *Runtime) runSlashCommand(ctx context.Context, line string, out io.Write
 		return nil
 
 	case "/approve":
+		if r.gate == nil {
+			r.gate = &ApprovalGate{Out: out}
+		}
 		r.gate.AutoApprove = true
 		fmt.Fprintln(out, "auto-approve enabled")
 		return nil
 
 	case "/noapprove", "/no-approve":
+		if r.gate == nil {
+			r.gate = &ApprovalGate{Out: out}
+		}
 		r.gate.AutoApprove = false
 		fmt.Fprintln(out, "auto-approve disabled")
 		return nil

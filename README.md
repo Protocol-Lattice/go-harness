@@ -131,6 +131,16 @@ Useful flags:
 | `-timeout` | `2m` | Per-request timeout |
 | `-y` | `false` | Auto-approve tool/code execution |
 
+## Tool Approval
+
+`go-harness` enforces provider-level approval before executing risky tools.
+Read-only calls such as `filesystem.read`, `filesystem.list`, `git.status`,
+`git.diff`, and `git.log` run without prompting.
+
+The harness asks before `shell.run`, mutating filesystem tools, `git.add`,
+`git.commit`, streamed calls, and unknown tools. Use `-y` for a non-interactive
+run, or `/approve` and `/noapprove` inside the REPL to toggle auto-approval.
+
 ## Bundled Providers
 
 The Makefile builds three provider binaries:
