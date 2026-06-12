@@ -70,6 +70,7 @@ func (a *App) baseFlags(name string, args []string) (harness.Config, *flag.FlagS
 		SkillsDir:     "./skills",
 		ProvidersFile: "./providers.json",
 		Workspace:     ".",
+		MemoryDir:     ".agent-memory",
 		MaxTurns:      8,
 		Timeout:       2 * time.Minute,
 		AutoApprove:   false,
@@ -84,6 +85,7 @@ func (a *App) baseFlags(name string, args []string) (harness.Config, *flag.FlagS
 	fs.StringVar(&cfg.SkillsDir, "skills", cfg.SkillsDir, "skills directory")
 	fs.StringVar(&cfg.ProvidersFile, "providers", cfg.ProvidersFile, "UTCP providers file")
 	fs.StringVar(&cfg.Workspace, "workspace", cfg.Workspace, "workspace root")
+	fs.StringVar(&cfg.MemoryDir, "memory", cfg.MemoryDir, "markdown memory directory")
 	fs.IntVar(&cfg.MaxTurns, "max-turns", cfg.MaxTurns, "max autonomous turns")
 	fs.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout, "request timeout")
 	fs.BoolVar(&cfg.AutoApprove, "y", cfg.AutoApprove, "auto-approve tool/code execution")

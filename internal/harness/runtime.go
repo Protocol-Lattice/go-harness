@@ -17,9 +17,10 @@ import (
 )
 
 type Runtime struct {
-	cfg   Config
-	agent *agent.Agent
-	gate  ApprovalGate
+	cfg         Config
+	agent       *agent.Agent
+	gate        ApprovalGate
+	memoryStore *memory.MarkdownStore
 }
 
 const memoryFlushTimeout = 10 * time.Second
@@ -73,8 +74,9 @@ func NewRuntime(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writ
 	}
 
 	return &Runtime{
-		cfg:   cfg,
-		agent: a,
+		cfg:         cfg,
+		agent:       a,
+		memoryStore: mdStore,
 		gate: ApprovalGate{
 			AutoApprove: cfg.AutoApprove,
 			In:          stdin,
@@ -185,6 +187,11 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 func (r *Runtime) RunOnce(ctx context.Context, prompt string, out io.Writer) error {
+	store, recordsBefore, err := r.sessionRecordSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+
 	reqCtx, cancel := context.WithTimeout(ctx, r.cfg.Timeout)
 	defer cancel()
 
@@ -193,14 +200,93 @@ func (r *Runtime) RunOnce(ctx context.Context, prompt string, out io.Writer) err
 		return err
 	}
 
-	fmt.Fprintln(out, strings.TrimSpace(fmt.Sprint(resp)))
+	response := strings.TrimSpace(fmt.Sprint(resp))
+	fmt.Fprintln(out, response)
 
 	flushCtx, flushCancel := context.WithTimeout(ctx, memoryFlushTimeout)
 	defer flushCancel()
 	if err := r.agent.Flush(flushCtx, r.cfg.SessionID); err != nil {
 		return fmt.Errorf("save memory: %w", err)
 	}
+	if err := r.saveTranscriptIfMissing(flushCtx, store, recordsBefore, prompt, response); err != nil {
+		return fmt.Errorf("save transcript fallback: %w", err)
+	}
 
+	return nil
+}
+
+func (r *Runtime) sessionRecordSnapshot(ctx context.Context) (*memory.MarkdownStore, int, error) {
+	store, err := r.transcriptStore()
+	if err != nil {
+		return nil, 0, err
+	}
+	count, err := countSessionRecords(ctx, store, r.cfg.SessionID)
+	return store, count, err
+}
+
+func (r *Runtime) transcriptStore() (*memory.MarkdownStore, error) {
+	if r.memoryStore != nil {
+		return r.memoryStore, nil
+	}
+	if strings.TrimSpace(r.cfg.MemoryDir) == "" {
+		return nil, nil
+	}
+	return memory.NewMarkdownStore(r.cfg.MemoryDir)
+}
+
+func countSessionRecords(ctx context.Context, store *memory.MarkdownStore, sessionID string) (int, error) {
+	if store == nil {
+		return 0, nil
+	}
+	records, err := store.List(ctx, "sessions", sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return len(records), nil
+}
+
+func (r *Runtime) saveTranscriptIfMissing(
+	ctx context.Context,
+	store *memory.MarkdownStore,
+	recordsBefore int,
+	prompt string,
+	response string,
+) error {
+	if store == nil {
+		return nil
+	}
+
+	recordsAfter, err := countSessionRecords(ctx, store, r.cfg.SessionID)
+	if err != nil {
+		return err
+	}
+	if recordsAfter > recordsBefore {
+		return nil
+	}
+
+	metadata := map[string]any{"source": "runtime_fallback"}
+	if strings.TrimSpace(prompt) != "" {
+		if err := store.Save(ctx, memory.MarkdownRecord{
+			Scope:     "sessions",
+			SessionID: r.cfg.SessionID,
+			Role:      "user",
+			Content:   prompt,
+			Metadata:  metadata,
+		}); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(response) != "" {
+		if err := store.Save(ctx, memory.MarkdownRecord{
+			Scope:     "sessions",
+			SessionID: r.cfg.SessionID,
+			Role:      "assistant",
+			Content:   response,
+			Metadata:  metadata,
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
