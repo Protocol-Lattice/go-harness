@@ -30,6 +30,8 @@ Tool usage:
 
 CodeMode rules:
 - CodeMode snippets are Go statements executed inside an existing function.
+- Use codemode.run_code for multi-tool workflows when a task needs multiple
+  filesystem, shell, or git calls to complete one coherent operation.
 - Never include "package main".
 - Never include "func main".
 - Never include import blocks.
@@ -111,9 +113,10 @@ Forbidden CodeMode examples:
 - shell.run with "command" unless the schema explicitly contains command
 
 Shell tool rule:
-- shell.run expects {"command":"..."} as a single string.
-- Never pass shell commands as arrays.
-- For commands using cd, &&, pipes, redirects, or env vars, keep the entire command as one string.
+- shell.run accepts argv for simple commands, e.g. {"argv":["go","test","./..."]}.
+- shell.run also accepts command with args, e.g. {"command":"go","args":["test","./..."]}.
+- Prefer cwd over cd, e.g. {"command":"go","args":["mod","tidy"],"cwd":"app"}.
+- Avoid shell operators such as cd, &&, pipes, redirects, or env vars unless shell mode is explicitly enabled.
 
 Planning:
 - If a task needs files changed, use tools instead of only explaining.
