@@ -14,29 +14,45 @@ import (
 )
 
 func TestToolApprovalAllowsReadOnlyToolWithoutPrompt(t *testing.T) {
-	inner := &stubApprovalUTCPClient{}
-	var out strings.Builder
-	gate := &ApprovalGate{
-		In:  strings.NewReader("n\n"),
-		Out: &out,
+	tests := []struct {
+		name     string
+		toolName string
+	}{
+		{name: "filesystem read", toolName: "filesystem.read"},
+		{name: "filesystem list", toolName: "filesystem.list"},
+		{name: "mcp read file", toolName: "read_file"},
+		{name: "mcp list dir", toolName: "list_dir"},
+		{name: "namespaced read file", toolName: "filesystem.read_file"},
+		{name: "namespaced list dir", toolName: "filesystem.list_dir"},
 	}
 
-	client := NewApprovingUTCPClient(inner, gate, DefaultToolApprovalPolicy())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inner := &stubApprovalUTCPClient{}
+			var out strings.Builder
+			gate := &ApprovalGate{
+				In:  strings.NewReader("n\n"),
+				Out: &out,
+			}
 
-	result, err := client.CallTool(context.Background(), "filesystem.read", map[string]any{
-		"path": "README.md",
-	})
-	if err != nil {
-		t.Fatalf("CallTool returned error: %v", err)
-	}
-	if result != "called filesystem.read" {
-		t.Fatalf("result = %v, want read result", result)
-	}
-	if inner.callCount != 1 {
-		t.Fatalf("inner call count = %d, want 1", inner.callCount)
-	}
-	if out.String() != "" {
-		t.Fatalf("approval prompt = %q, want empty", out.String())
+			client := NewApprovingUTCPClient(inner, gate, DefaultToolApprovalPolicy())
+
+			result, err := client.CallTool(context.Background(), tt.toolName, map[string]any{
+				"path": "README.md",
+			})
+			if err != nil {
+				t.Fatalf("CallTool returned error: %v", err)
+			}
+			if result != "called "+tt.toolName {
+				t.Fatalf("result = %v, want read result", result)
+			}
+			if inner.callCount != 1 {
+				t.Fatalf("inner call count = %d, want 1", inner.callCount)
+			}
+			if out.String() != "" {
+				t.Fatalf("approval prompt = %q, want empty", out.String())
+			}
+		})
 	}
 }
 

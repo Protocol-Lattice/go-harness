@@ -18,13 +18,17 @@ type ToolApprovalPolicy struct {
 
 func DefaultToolApprovalPolicy() ToolApprovalPolicy {
 	allow := map[string]struct{}{
-		"filesystem.read":   {},
-		"filesystem.list":   {},
-		"filesystem.stat":   {},
-		"filesystem.exists": {},
-		"git.status":        {},
-		"git.diff":          {},
-		"git.log":           {},
+		"filesystem.read":      {},
+		"filesystem.read_file": {},
+		"filesystem.list":      {},
+		"filesystem.list_dir":  {},
+		"filesystem.stat":      {},
+		"filesystem.exists":    {},
+		"read_file":            {},
+		"list_dir":             {},
+		"git.status":           {},
+		"git.diff":             {},
+		"git.log":              {},
 	}
 	return ToolApprovalPolicy{allowWithoutPrompt: allow}
 }
