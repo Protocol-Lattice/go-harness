@@ -81,10 +81,17 @@ After building providers and adding the root providers file, verify discovery:
 
 ## Usage
 
-Start the interactive REPL:
+Start the free-form interactive REPL:
 
 ```bash
 ./bin/go-harness
+```
+
+Start the task-loop TUI, which previews numbered subtasks and asks before
+running them:
+
+```bash
+./bin/go-harness tui
 ```
 
 Run a single prompt:
@@ -105,7 +112,7 @@ Common commands:
 ./bin/go-harness version
 ```
 
-The REPL supports slash commands:
+The chat REPL and task-loop TUI support slash commands:
 
 ```text
 /help

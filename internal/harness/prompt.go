@@ -110,6 +110,11 @@ Forbidden CodeMode examples:
 - return nil
 - shell.run with "command" unless the schema explicitly contains command
 
+Shell tool rule:
+- shell.run expects {"command":"..."} as a single string.
+- Never pass shell commands as arrays.
+- For commands using cd, &&, pipes, redirects, or env vars, keep the entire command as one string.
+
 Planning:
 - If a task needs files changed, use tools instead of only explaining.
 - If the user asks to create a project, create files first, then run validation.
