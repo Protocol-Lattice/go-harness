@@ -268,11 +268,15 @@ func TestBuildTaskExecutionPrompt(t *testing.T) {
 		"Full approved task list:",
 		"1. Create directory app",
 		"2. Write app/main.go with complete MCP server implementation",
+		"Use codemode.run_code when the current subtask requires multiple tool calls",
 		"Do not create empty placeholder files",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("buildTaskExecutionPrompt() missing %q:\n%s", expected, prompt)
 		}
+	}
+	if strings.Contains(prompt, "Do not use CodeMode") {
+		t.Fatalf("buildTaskExecutionPrompt() forbids CodeMode workflows:\n%s", prompt)
 	}
 }
 
