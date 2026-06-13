@@ -280,6 +280,32 @@ func TestBuildTaskExecutionPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildTaskExecutionPromptUsesDirectShellRunForCommandSubtask(t *testing.T) {
+	prompt := buildTaskExecutionPrompt(
+		"Create simple mcp server in new folder. using mark3lab/mcp-go.",
+		[]string{
+			"Create a new directory named mcp-server.",
+			"Initialize a new Go module in the mcp-server directory with the command: go mod init mcp-server",
+		},
+		1,
+	)
+
+	if !strings.HasPrefix(prompt, "shell.run ") {
+		t.Fatalf("buildTaskExecutionPrompt() did not return direct shell.run invocation:\n%s", prompt)
+	}
+	for _, expected := range []string{
+		`"argv":["go","mod","init","mcp-server"]`,
+		`"cwd":"mcp-server"`,
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("direct shell.run prompt missing %q:\n%s", expected, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Execute exactly one approved subtask") {
+		t.Fatalf("direct shell.run prompt still uses natural-language execution prompt:\n%s", prompt)
+	}
+}
+
 func TestRuntimePlanTasksUsesModelAndParsesNumberedTasks(t *testing.T) {
 	model := &staticTaskPlanModel{
 		response: strings.Join([]string{
@@ -352,6 +378,75 @@ func TestRuntimePlanTasksFiltersNavigationAndCapsRequestedCount(t *testing.T) {
 	}
 	if !strings.Contains(model.prompt, "exactly 3 numbered subtasks") {
 		t.Fatalf("planner prompt did not request exactly 3 tasks:\n%s", model.prompt)
+	}
+}
+
+func TestRuntimePlanTasksRepairsContentlessFileTask(t *testing.T) {
+	model := &staticTaskPlanModel{
+		response: strings.Join([]string{
+			"1. mkdir hello-app",
+			"2. Create hello-app/main.go with the following content:",
+		}, "\n"),
+	}
+	rt := &Runtime{
+		cfg: Config{
+			SessionID: "task-loop-test",
+			MaxTurns:  5,
+			Timeout:   time.Second,
+		},
+		model: model,
+	}
+
+	tasks, err := rt.planTasks(
+		context.Background(),
+		"create new folder hello-app and develop main.go mcp filesystem server",
+	)
+	if err != nil {
+		t.Fatalf("planTasks returned error: %v", err)
+	}
+
+	expected := []string{
+		"mkdir hello-app",
+		"Create hello-app/main.go with a complete compilable Go MCP filesystem server implementation inferred from the original task; do not write empty content.",
+	}
+	if !reflect.DeepEqual(tasks, expected) {
+		t.Fatalf("planTasks() = %#v, want %#v", tasks, expected)
+	}
+	if strings.Contains(tasks[1], "following content:") {
+		t.Fatalf("planTasks kept contentless file task: %#v", tasks)
+	}
+}
+
+func TestRuntimePlanTasksRepairsTruncatedGoSourceTask(t *testing.T) {
+	model := &staticTaskPlanModel{
+		response: strings.Join([]string{
+			"1. Create a new directory named mcp-server.",
+			"2. Create the file mcp-server/main.go with the following Go source code: package main",
+		}, "\n"),
+	}
+	rt := &Runtime{
+		cfg: Config{
+			SessionID: "task-loop-test",
+			MaxTurns:  5,
+			Timeout:   time.Second,
+		},
+		model: model,
+	}
+
+	tasks, err := rt.planTasks(
+		context.Background(),
+		"Create simple mcp server in new folder. using mark3lab/mcp-go.",
+	)
+	if err != nil {
+		t.Fatalf("planTasks returned error: %v", err)
+	}
+
+	expected := "Create mcp-server/main.go with a complete compilable Go MCP server implementation inferred from the original task; do not write empty content."
+	if tasks[1] != expected {
+		t.Fatalf("planTasks()[1] = %q, want %q", tasks[1], expected)
+	}
+	if strings.Contains(tasks[1], "package main") {
+		t.Fatalf("planTasks kept truncated Go source task: %#v", tasks)
 	}
 }
 

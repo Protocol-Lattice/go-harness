@@ -199,6 +199,72 @@ __out = runResult`
 	}
 }
 
+func TestNormalizeModelOutputRepairsNestedCodeModeRunCodeBareGoProgram(t *testing.T) {
+	code := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello, World!")
+}`
+
+	inputBytes, err := json.Marshal(map[string]any{
+		"use_tool":  true,
+		"tool_name": "codemode.run_code",
+		"arguments": map[string]any{
+			"code":    code,
+			"timeout": 30000,
+		},
+		"reason": "create a Go hello world program",
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	got, ok := normalizeModelOutputForPrompt(
+		string(inputBytes),
+		toolChoicePromptForTest("Create simple hello world application in golang"),
+	).(string)
+	if !ok {
+		t.Fatalf("expected normalized model output to remain a string")
+	}
+
+	var payload struct {
+		UseTool   bool           `json:"use_tool"`
+		ToolName  string         `json:"tool_name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("normalized output is not valid JSON: %v\n%s", err, got)
+	}
+
+	if !payload.UseTool || payload.ToolName != "codemode.run_code" {
+		t.Fatalf("tool choice fields changed: %+v", payload)
+	}
+
+	normalizedCode, ok := payload.Arguments["code"].(string)
+	if !ok {
+		t.Fatalf("expected arguments.code string, got %#v", payload.Arguments["code"])
+	}
+
+	mustContain := []string{
+		"__out = func() any {",
+		`codemode.CallTool("filesystem.write"`,
+		`"path": "main.go"`,
+		`fmt.Println(\"Hello, World!\")`,
+		"return map[string]any{",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(normalizedCode, want) {
+			t.Fatalf("normalized nested snippet missing %q:\n%s", want, normalizedCode)
+		}
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(normalizedCode), "package main") {
+		t.Fatalf("normalized nested snippet still starts with package declaration:\n%s", normalizedCode)
+	}
+}
+
 func TestNormalizeCodeModeSnippetLeavesProseAlone(t *testing.T) {
 	input := "I cannot use tools because no filesystem schema is available."
 	if got := NormalizeCodeModeSnippet(input); got != input {
@@ -322,6 +388,12 @@ func codeModeGenerationPromptForTest(query string) string {
 	return "Generate a Go snippet that uses ONLY the following UTCP tools:\n\nUSER QUERY:\n" +
 		strconv.Quote(query) +
 		"\n\nTOOL SPECS:\nfilesystem.mkdir filesystem.write shell.run\n\nRespond ONLY in JSON:\n{\n  \"code\": \"<go snippet>\",\n  \"stream\": false\n}"
+}
+
+func toolChoicePromptForTest(query string) string {
+	return "You are a UTCP tool selection and planning engine.\n\nUSER REQUEST:\n" +
+		strconv.Quote(query) +
+		"\n\nAVAILABLE UTCP TOOLS:\nfilesystem.write codemode.run_code\n\nReturn ONLY JSON."
 }
 
 func TestNormalizeCodeModeSnippetRepairsBuildAndRunSnippet(t *testing.T) {

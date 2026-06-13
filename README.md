@@ -1,8 +1,9 @@
 # go-harness
 
-`go-harness` is an agentic Go coding harness built on
-[`github.com/Protocol-Lattice/go-agent`](https://github.com/Protocol-Lattice/go-agent).
-It provides a CLI/REPL that can load markdown skills, persist session memory,
+`go-harness` is a Go-native Claude Code-style coding agent: a toolkit that turns
+"LLM wants to modify files" into a safe CodeMode workflow. Built on
+[`github.com/Protocol-Lattice/go-agent`](https://github.com/Protocol-Lattice/go-agent),
+it provides a CLI/REPL that can load markdown skills, persist session memory,
 discover UTCP tools, and run coding tasks through filesystem, shell, and git
 provider binaries.
 
@@ -116,6 +117,7 @@ The chat REPL and task-loop TUI support slash commands:
 
 ```text
 /help
+/status
 /tools
 /skills
 /approve
@@ -137,6 +139,35 @@ Useful flags:
 | `-max-turns` | `8` | Maximum autonomous turns |
 | `-timeout` | `2m` | Per-request timeout |
 | `-y` | `false` | Auto-approve tool/code execution |
+
+## Safe CodeMode Workflow
+
+When the LLM needs to modify files, `go-harness` treats the edit as a workflow
+instead of raw filesystem access:
+
+- inspect the workspace with read-only filesystem, shell, and git tools;
+- group related filesystem, shell, and git calls through `codemode.run_code`
+  when one coherent operation needs multiple tool calls;
+- route every tool call through the same approval gate before risky operations;
+- constrain bundled providers to the configured workspace root;
+- validate with shell or git output when relevant, then summarize only
+  tool-confirmed results.
+
+This workflow makes file changes reviewable and approval-gated. It does not make
+LLM-generated code correct by itself; tests and explicit validation still matter.
+
+## Agent Status
+
+Use `/status` in chat or task-loop mode to inspect the active harness
+configuration without exposing credentials:
+
+```text
+/status
+```
+
+The status output includes the provider, model, workspace, session, skills
+directory, providers file, memory directory, max turns, timeout, and current
+auto-approval state.
 
 ## Tool Approval
 

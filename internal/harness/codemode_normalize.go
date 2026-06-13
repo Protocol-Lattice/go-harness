@@ -68,7 +68,7 @@ func normalizeCodeModeSnippetForPrompt(src string, prompt string) string {
 	original := src
 	src = strings.TrimSpace(src)
 
-	if normalized, ok := normalizeCodeModeRunCodeToolChoiceJSON(src); ok {
+	if normalized, ok := normalizeCodeModeRunCodeToolChoiceJSON(src, prompt); ok {
 		return normalized
 	}
 
@@ -300,7 +300,7 @@ func ensureTrailingNewline(src string) string {
 	return src + "\n"
 }
 
-func normalizeCodeModeRunCodeToolChoiceJSON(src string) (string, bool) {
+func normalizeCodeModeRunCodeToolChoiceJSON(src string, prompt string) (string, bool) {
 	for _, candidate := range jsonObjectCandidates(src) {
 		var payload map[string]any
 		if err := json.Unmarshal([]byte(candidate), &payload); err != nil {
@@ -318,11 +318,11 @@ func normalizeCodeModeRunCodeToolChoiceJSON(src string) (string, bool) {
 		}
 
 		code, ok := args["code"].(string)
-		if !ok || !looksLikeCodeModeSnippet(code) {
+		if !ok {
 			continue
 		}
 
-		args["code"] = NormalizeCodeModeSnippet(code)
+		args["code"] = normalizeNestedCodeModeRunCode(prompt, code)
 
 		normalized, err := json.Marshal(payload)
 		if err != nil {
@@ -333,6 +333,18 @@ func normalizeCodeModeRunCodeToolChoiceJSON(src string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func normalizeNestedCodeModeRunCode(prompt string, code string) string {
+	if source, ok := extractGoMainProgram(code); ok {
+		return wrapCodeModeBody(goProgramWriteSnippet(prompt, code, source))
+	}
+
+	if source, ok := extractBareGoMainProgram(code); ok {
+		return wrapCodeModeBody(goProgramWriteSnippet(prompt, code, source))
+	}
+
+	return NormalizeCodeModeSnippet(code)
 }
 
 func jsonObjectCandidates(src string) []string {

@@ -3,6 +3,7 @@ package harness
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,8 +31,13 @@ type Runtime struct {
 const memoryFlushTimeout = 10 * time.Second
 
 var (
-	numberedTaskLinePattern = regexp.MustCompile(`^\s*\d+[\.)]\s+(.+?)\s*$`)
-	requestedTaskCountRE    = regexp.MustCompile(`(?i)\bin\s+(\d+)\s+tasks?\b`)
+	numberedTaskLinePattern     = regexp.MustCompile(`^\s*\d+[\.)]\s+(.+?)\s*$`)
+	requestedTaskCountRE        = regexp.MustCompile(`(?i)\bin\s+(\d+)\s+tasks?\b`)
+	contentlessFileTaskSuffixRE = regexp.MustCompile(`(?i)\bwith\s+(?:the\s+)?(?:following\s+)?content\s*:?\s*$`)
+	truncatedGoSourceTaskRE     = regexp.MustCompile(`(?i)\bwith\s+(?:the\s+)?(?:following\s+)?(?:go\s+)?(?:source\s+code|content)\s*:\s*package\s+main\s*$`)
+	taskFilePathPattern         = regexp.MustCompile(`\b([A-Za-z0-9][A-Za-z0-9._/-]*\.[A-Za-z0-9][A-Za-z0-9._-]*)\b`)
+	taskShellCommandPattern     = regexp.MustCompile(`(?i)\bcommand:\s*(.+?)\s*\.?\s*$`)
+	taskDirectoryPattern        = regexp.MustCompile(`(?i)\bin\s+(?:the\s+)?([A-Za-z0-9._/-]+)\s+directory\b`)
 )
 
 // internal/harness/runtime.go
@@ -176,7 +182,7 @@ func (r *Runtime) planTasks(ctx context.Context, task string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	tasks := filterExecutableTasks(parseNumberedTasks(fmt.Sprint(resp)))
+	tasks := normalizeExecutableTasks(task, parseNumberedTasks(fmt.Sprint(resp)))
 	if len(tasks) > limit {
 		tasks = tasks[:limit]
 	}
@@ -203,6 +209,8 @@ Rules:
 - If the task asks for a file, include the file path and content intent in the same subtask.
 - If the user says "with the following content" but provides no content, infer a minimal useful implementation for the requested project.
 - For Go MCP server requests, file-writing subtasks must include intent to create a complete compilable main.go.
+- Never output a file-writing subtask that ends with "with the following content:". Describe the complete implementation intent instead.
+- Never output a Go file-writing subtask whose only source content is "package main". Describe the complete implementation intent instead.
 - Shell commands must remain shell-command subtasks, not Go code-generation subtasks.
 - Do not create a separate "run executable" subtask for long-running servers unless the task explicitly asks to verify startup briefly.
 - Do not create empty placeholder files; file-writing subtasks must request complete useful content.
@@ -284,6 +292,63 @@ func filterExecutableTasks(tasks []string) []string {
 		filtered = append(filtered, task)
 	}
 	return filtered
+}
+
+func normalizeExecutableTasks(originalTask string, tasks []string) []string {
+	filtered := filterExecutableTasks(tasks)
+	for i, task := range filtered {
+		filtered[i] = repairContentlessFileTask(originalTask, task)
+	}
+	return filtered
+}
+
+func repairContentlessFileTask(originalTask string, task string) string {
+	task = strings.TrimSpace(task)
+	if !isContentlessFileTask(task) {
+		return task
+	}
+
+	path := inferTaskFilePath(task)
+	intent := inferTaskContentIntent(originalTask, task, path)
+	if path == "" {
+		return fmt.Sprintf("Create a file with a %s inferred from the original task; do not write empty content.", intent)
+	}
+	return fmt.Sprintf("Create %s with a %s inferred from the original task; do not write empty content.", path, intent)
+}
+
+func isContentlessFileTask(task string) bool {
+	trimmed := strings.TrimSpace(task)
+	if !contentlessFileTaskSuffixRE.MatchString(trimmed) && !truncatedGoSourceTaskRE.MatchString(trimmed) {
+		return false
+	}
+
+	lower := strings.ToLower(task)
+	return strings.Contains(lower, "file") || taskFilePathPattern.MatchString(task)
+}
+
+func inferTaskFilePath(task string) string {
+	match := taskFilePathPattern.FindStringSubmatch(task)
+	if len(match) != 2 {
+		return ""
+	}
+	return strings.Trim(match[1], `"'.,:;`)
+}
+
+func inferTaskContentIntent(originalTask string, task string, path string) string {
+	context := strings.ToLower(originalTask + " " + task + " " + path)
+	isGo := strings.Contains(context, "golang") ||
+		strings.Contains(context, " go ") ||
+		strings.HasSuffix(strings.ToLower(path), ".go")
+	if strings.Contains(context, "mcp") && isGo {
+		if strings.Contains(context, "filesystem") || strings.Contains(context, "file system") {
+			return "complete compilable Go MCP filesystem server implementation"
+		}
+		return "complete compilable Go MCP server implementation"
+	}
+	if isGo {
+		return "complete compilable Go implementation"
+	}
+	return "complete useful implementation"
 }
 
 func isNavigationOnlyTask(task string) bool {
@@ -400,6 +465,14 @@ func runTasks(
 }
 
 func buildTaskExecutionPrompt(originalTask string, tasks []string, index int) string {
+	currentTask := ""
+	if index >= 0 && index < len(tasks) {
+		currentTask = strings.TrimSpace(tasks[index])
+	}
+	if prompt, ok := buildDirectShellRunPrompt(currentTask); ok {
+		return prompt
+	}
+
 	var b strings.Builder
 
 	b.WriteString("Execute exactly one approved subtask from a task-loop plan.\n\n")
@@ -414,9 +487,7 @@ func buildTaskExecutionPrompt(originalTask string, tasks []string, index int) st
 	}
 
 	b.WriteString("\nCurrent subtask:\n")
-	if index >= 0 && index < len(tasks) {
-		b.WriteString(strings.TrimSpace(tasks[index]))
-	}
+	b.WriteString(currentTask)
 	b.WriteString("\n\n")
 
 	b.WriteString("Execution rules:\n")
@@ -433,6 +504,48 @@ func buildTaskExecutionPrompt(originalTask string, tasks []string, index int) st
 	b.WriteString("- After tool execution, return a short factual result based only on tool output.\n")
 
 	return b.String()
+}
+
+func buildDirectShellRunPrompt(task string) (string, bool) {
+	argv, ok := inferShellCommandArgv(task)
+	if !ok {
+		return "", false
+	}
+
+	args := map[string]any{"argv": argv}
+	if cwd := inferShellCommandCWD(task); cwd != "" {
+		args["cwd"] = cwd
+	}
+
+	payload, err := json.Marshal(args)
+	if err != nil {
+		return "", false
+	}
+	return "shell.run " + string(payload), true
+}
+
+func inferShellCommandArgv(task string) ([]string, bool) {
+	match := taskShellCommandPattern.FindStringSubmatch(strings.TrimSpace(task))
+	if len(match) != 2 {
+		return nil, false
+	}
+
+	command := strings.TrimSpace(match[1])
+	command = strings.Trim(command, `"'`)
+	command = strings.TrimRight(command, ".")
+	argv := strings.Fields(command)
+	if len(argv) == 0 {
+		return nil, false
+	}
+	return argv, true
+}
+
+func inferShellCommandCWD(task string) string {
+	match := taskDirectoryPattern.FindStringSubmatch(task)
+	if len(match) != 2 {
+		return ""
+	}
+	return strings.Trim(match[1], `"'.,:;`)
 }
 
 func (r *Runtime) runSlashCommand(ctx context.Context, line string, out io.Writer) error {
